@@ -94,7 +94,9 @@ def main():
                   load_in_4bit=args.load_in_4bit,
                   device_map=None)   # move manually so device is deterministic
     model, tok = load_reward_model(cfg)
-    model = apply_lora_seqcls(model)
+    # RM is small (LoRA on Qwen/SmolLM); grad checkpointing is pure overhead here
+    # and roughly halves throughput. Disable it — VRAM has headroom.
+    model = apply_lora_seqcls(model, grad_ckpt=False)
     model.to(device)
     print("param stats:", param_stats(model))
     print("initial vram:", vram_footprint_gb(), "GB")

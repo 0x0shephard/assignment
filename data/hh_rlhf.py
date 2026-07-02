@@ -166,17 +166,22 @@ def preference_collator(tokenizer, max_len: int = 1024, side: str = "left"):
     return _c
 
 
-def build_sft_loader(triples, tokenizer, batch_size=8, max_len=1024, shuffle=True):
+def build_sft_loader(triples, tokenizer, batch_size=8, max_len=1024, shuffle=True,
+                     num_workers=2):
     ds = SFTDataset(triples, tokenizer, max_len=max_len)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
-                      collate_fn=sft_collator(tokenizer, side="left"))
+                      collate_fn=sft_collator(tokenizer, side="left"),
+                      num_workers=num_workers, pin_memory=True,
+                      persistent_workers=num_workers > 0)
 
 
 def build_preference_loader(triples, tokenizer, batch_size=8, max_len=1024,
-                            shuffle=True, side="left"):
+                            shuffle=True, side="left", num_workers=2):
     ds = PreferenceDataset(triples)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
-                      collate_fn=preference_collator(tokenizer, max_len=max_len, side=side))
+                      collate_fn=preference_collator(tokenizer, max_len=max_len, side=side),
+                      num_workers=num_workers, pin_memory=True,
+                      persistent_workers=num_workers > 0)
 
 
 if __name__ == "__main__":
