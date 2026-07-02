@@ -1,0 +1,74 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Build / packaging ----
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# ---- IDE / OS ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Model / training artifacts ----
+checkpoints/
+runs/
+eval_results/
+wandb/
+tb_logs/
+lightning_logs/
+outputs/
+
+# LoRA adapters + head weights (usually small, but often overwritten)
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+adapter_model.*
+adapter_config.json
+value_head.pt
+
+# ---- HuggingFace / dataset caches ----
+.cache/
+.huggingface/
+hf_cache/
+datasets_cache/
+
+# ---- Logs / temp ----
+*.log
+*.out
+*.err
+tmp/
+scratch/
+
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+hf_token*
+kaggle.json
+
+# ---- Notebook outputs (keep source, drop generated artifacts) ----
+*.ipynb_meta
