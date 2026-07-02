@@ -44,13 +44,17 @@ def _pick_device():
     return torch.device("cpu")
 
 
-def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False):
+def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False,
+                          grad_ckpt: bool = False):
+    """grad_ckpt disabled by default — needed OFF for the .generate() rollout
+    inside GRPO (else HF forces use_cache=False → SDPA shape mismatch)."""
     from peft import PeftModel
     base, tok = load_policy(LoadCfg(policy_name, load_in_8bit=load_in_8bit, device_map=None))
     model = PeftModel.from_pretrained(base, sft_dir, is_trainable=True)
-    model.gradient_checkpointing_enable()
-    if hasattr(model, "enable_input_require_grads"):
-        model.enable_input_require_grads()
+    if grad_ckpt:
+        model.gradient_checkpointing_enable()
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
     model.to(device)
     return model, tok
 

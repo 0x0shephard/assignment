@@ -51,15 +51,21 @@ def _pick_device():
     return torch.device("cpu")   # PPO on MPS is fragile; disable by default
 
 
-def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False):
-    """Reload base policy and attach the SFT LoRA adapters as the starting point."""
+def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False,
+                          grad_ckpt: bool = False):
+    """Reload base policy and attach the SFT LoRA adapters as the starting point.
+
+    NOTE: grad_ckpt defaults to False. Enabling it forces HF's .generate() into
+    use_cache=False, which then triggers a shape mismatch (q_len=1 vs kv_len=T)
+    inside SDPA during iterative decoding. The 360M policy fits fine without it.
+    """
     from peft import PeftModel
     base, tok = load_policy(LoadCfg(policy_name, load_in_8bit=load_in_8bit, device_map=None))
     model = PeftModel.from_pretrained(base, sft_dir, is_trainable=True)
-    # gradient checkpointing + LoRA
-    model.gradient_checkpointing_enable()
-    if hasattr(model, "enable_input_require_grads"):
-        model.enable_input_require_grads()
+    if grad_ckpt:
+        model.gradient_checkpointing_enable()
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
     model.to(device)
     return model, tok
 

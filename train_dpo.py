@@ -35,13 +35,18 @@ def _pick_device():
     return torch.device("cpu")
 
 
-def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False):
+def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False,
+                          grad_ckpt: bool = False):
+    """DPO doesn't call .generate() during training (only teacher-forced
+    forwards), so grad_ckpt is safe here — but disabled by default to match
+    PPO/GRPO/RLVR behavior and keep speed high on small policies."""
     from peft import PeftModel
     base, tok = load_policy(LoadCfg(policy_name, load_in_8bit=load_in_8bit, device_map=None))
     model = PeftModel.from_pretrained(base, sft_dir, is_trainable=True)
-    model.gradient_checkpointing_enable()
-    if hasattr(model, "enable_input_require_grads"):
-        model.enable_input_require_grads()
+    if grad_ckpt:
+        model.gradient_checkpointing_enable()
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
     model.to(device)
     return model, tok
 
