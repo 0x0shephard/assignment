@@ -82,16 +82,18 @@ def generate_batch(policy, tok, prompts, device, max_new_tokens: int = 128,
     enc = tok(prompts, padding=True, truncation=True, return_tensors="pt").to(device)
     prompt_len = enc["input_ids"].shape[1]
 
+    if temperature is None or temperature <= 0:
+        gen_kwargs = dict(do_sample=False)
+    else:
+        gen_kwargs = dict(do_sample=True, temperature=temperature, top_p=top_p)
     gen = policy.generate(
         input_ids=enc["input_ids"],
         attention_mask=enc["attention_mask"],
         max_new_tokens=max_new_tokens,
-        do_sample=True,
-        temperature=temperature,
-        top_p=top_p,
         pad_token_id=tok.pad_token_id,
         return_dict_in_generate=False,
         use_cache=True,
+        **gen_kwargs,
     )
     full_ids = gen                              # [B, prompt_len + T_resp]
     # attention mask: 1 for real prompt tokens and all response tokens; the
