@@ -110,22 +110,31 @@ def grpo_step_loss(logits_new: torch.Tensor,
         advantages_std: [B*K]      one scalar per row, broadcast over tokens
     """
     # shift-by-one alignment (same as PPO)
-    logits_new_shift = logits_new[:, :-1, :]
-    logits_ref_shift = logits_ref[:, :-1, :]
     ids_shift = input_ids[:, 1:]
     m = response_mask[:, 1:].float()
 
     # Sampled-token log-probs via logsumexp — avoids materializing the full
     # [B*K, T-1, V] log-softmax tensor which would OOM for large vocab.
     # log π(y_t) = logits[y_t] - logsumexp(logits, dim=-1)
-    ln_new = logits_new_shift.float()
-    ln_ref = logits_ref_shift.float()
+    #
+    # Memory discipline: we deliberately compute the "new" side, free the
+    # temporary fp32 tensor, then compute the "ref" side. Holding both at
+    # once doubles peak allocation and OOMs on T4 (~800 MB per side).
+    ln_new = logits_new[:, :-1, :].float()
     gather_new = ln_new.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
-    gather_ref = ln_ref.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
     lse_new = torch.logsumexp(ln_new, dim=-1)
-    lse_ref = torch.logsumexp(ln_ref, dim=-1)
     lp_new_tok = gather_new - lse_new                                            # [B*K, T-1]
+    if kl_mode == "full":
+        lp_new_all = F.log_softmax(ln_new, dim=-1)
+    del ln_new
+
+    ln_ref = logits_ref[:, :-1, :].float()
+    gather_ref = ln_ref.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
+    lse_ref = torch.logsumexp(ln_ref, dim=-1)
     lp_ref_tok = gather_ref - lse_ref
+    if kl_mode == "full":
+        lp_ref_all = F.log_softmax(ln_ref, dim=-1)
+    del ln_ref
 
     ratio = torch.exp(lp_new_tok - logprobs_old)                                # ρ_{k,t}
     adv_tok = advantages_std.unsqueeze(1).expand_as(m)                          # broadcast
@@ -140,10 +149,8 @@ def grpo_step_loss(logits_new: torch.Tensor,
     policy_loss = per_row.mean()
 
     if kl_mode == "full":
-        # Full-vocab KL: needs materialized log-softmax on both sides.
-        # Only enabled explicitly — memory-heavy.
-        lp_new_all = F.log_softmax(ln_new, dim=-1)
-        lp_ref_all = F.log_softmax(ln_ref, dim=-1)
+        # Full-vocab KL: lp_new_all / lp_ref_all were computed above alongside
+        # the sampled-token log-probs. Memory-heavy — prefer "mc" on tight VRAM.
         kl_tok = per_token_kl_full(lp_new_all, lp_ref_all)
     elif kl_mode == "mc":
         kl_tok = lp_new_tok - lp_ref_tok                                         # unbiased MC
