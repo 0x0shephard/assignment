@@ -109,17 +109,23 @@ def grpo_step_loss(logits_new: torch.Tensor,
         logprobs_old:  [B*K, T-1]  cached from rollout time
         advantages_std: [B*K]      one scalar per row, broadcast over tokens
     """
-    lp_new_all = F.log_softmax(logits_new.float(), dim=-1)
-    lp_ref_all = F.log_softmax(logits_ref.float(), dim=-1)
-
     # shift-by-one alignment (same as PPO)
-    lp_new_shift = lp_new_all[:, :-1, :]
-    lp_ref_shift = lp_ref_all[:, :-1, :]
+    logits_new_shift = logits_new[:, :-1, :]
+    logits_ref_shift = logits_ref[:, :-1, :]
     ids_shift = input_ids[:, 1:]
     m = response_mask[:, 1:].float()
 
-    lp_new_tok = lp_new_shift.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)   # [B*K, T-1]
-    lp_ref_tok = lp_ref_shift.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
+    # Sampled-token log-probs via logsumexp — avoids materializing the full
+    # [B*K, T-1, V] log-softmax tensor which would OOM for large vocab.
+    # log π(y_t) = logits[y_t] - logsumexp(logits, dim=-1)
+    ln_new = logits_new_shift.float()
+    ln_ref = logits_ref_shift.float()
+    gather_new = ln_new.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
+    gather_ref = ln_ref.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
+    lse_new = torch.logsumexp(ln_new, dim=-1)
+    lse_ref = torch.logsumexp(ln_ref, dim=-1)
+    lp_new_tok = gather_new - lse_new                                            # [B*K, T-1]
+    lp_ref_tok = gather_ref - lse_ref
 
     ratio = torch.exp(lp_new_tok - logprobs_old)                                # ρ_{k,t}
     adv_tok = advantages_std.unsqueeze(1).expand_as(m)                          # broadcast
@@ -134,7 +140,11 @@ def grpo_step_loss(logits_new: torch.Tensor,
     policy_loss = per_row.mean()
 
     if kl_mode == "full":
-        kl_tok = per_token_kl_full(lp_new_shift, lp_ref_shift)                   # [B*K, T-1]
+        # Full-vocab KL: needs materialized log-softmax on both sides.
+        # Only enabled explicitly — memory-heavy.
+        lp_new_all = F.log_softmax(ln_new, dim=-1)
+        lp_ref_all = F.log_softmax(ln_ref, dim=-1)
+        kl_tok = per_token_kl_full(lp_new_all, lp_ref_all)
     elif kl_mode == "mc":
         kl_tok = lp_new_tok - lp_ref_tok                                         # unbiased MC
     else:
@@ -148,9 +158,10 @@ def grpo_step_loss(logits_new: torch.Tensor,
     with torch.no_grad():
         approx_kl = ((logprobs_old - lp_new_tok) * m).sum() / m.sum().clamp(min=1)
         clip_frac = (((ratio - 1.0).abs() > eps_clip).float() * m).sum() / m.sum().clamp(min=1)
-        # entropy of π_θ per token
-        ent_tok = -(lp_new_shift.exp() * lp_new_shift).sum(dim=-1)
-        entropy = (ent_tok * m).sum() / m.sum().clamp(min=1)
+        # entropy of π_θ per token, computed memory-light without materializing
+        # the full log-softmax: H = logsumexp - E[logit] where E is over softmax.
+        # For monitoring only, use sampled-token entropy proxy.
+        entropy = -(lp_new_tok * m).sum() / m.sum().clamp(min=1)
     return GRPOLossOut(loss=loss, policy_loss=policy_loss.detach(),
                        kl_term=kl_term.detach(),
                        approx_kl_ratio=approx_kl, clip_frac=clip_frac,
