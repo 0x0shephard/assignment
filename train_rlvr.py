@@ -219,6 +219,12 @@ def main():
                           "eval_kl": ev["kl_ref"],
                           "eval_format_ok": ev["format_compliance"],
                           "eval_len": ev["mean_len"]})
+            # Periodic checkpoint so a mid-training OOM doesn't lose everything.
+            out_dir_step = Path(args.out); out_dir_step.mkdir(parents=True, exist_ok=True)
+            policy.save_pretrained(out_dir_step)
+            policy_tok.save_pretrained(out_dir_step)
+            (out_dir_step / "log.json").write_text(json.dumps({"log": log, "last_eval": ev}, indent=2))
+            print(f"    (saved checkpoint at step {step})")
 
     # final
     ev = eval_pass_at_1(policy, policy_tok, eval_items, device,

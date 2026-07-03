@@ -231,6 +231,13 @@ def main():
             print(f"    eval@{step}: rm={ev['rm_mean']:+.3f} "
                   f"kl_ref={ev['kl_mean']:+.4f} len={ev['resp_len']:.1f}")
             entry.update({"eval_rm": ev["rm_mean"], "eval_kl": ev["kl_mean"]})
+            # Periodic checkpoint so a mid-training OOM doesn't lose everything.
+            out_dir_step = Path(args.out); out_dir_step.mkdir(parents=True, exist_ok=True)
+            policy.save_pretrained(out_dir_step)
+            policy_tok.save_pretrained(out_dir_step)
+            torch.save(value_model.value_head.state_dict(), out_dir_step / "value_head.pt")
+            (out_dir_step / "log.json").write_text(json.dumps(log, indent=2))
+            print(f"    (saved checkpoint at step {step})")
 
     out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
     policy.save_pretrained(out_dir)
