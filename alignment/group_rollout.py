@@ -30,10 +30,8 @@ def collect_group_rollout(policy, rm, rm_tok, policy_tok, prompts,
     attn = gen["attention_mask"]
     resp_mask = gen["response_mask"]
 
-    # cached π_old log-probs on shifted grid
     lp_old, _ = compute_response_logprobs(policy, input_ids, attn, resp_mask)
 
-    # RM score on full text
     texts = policy_tok.batch_decode(input_ids, skip_special_tokens=True)
     r_task = score_texts(rm, rm_tok, texts, device, batch_size=B * K)
 

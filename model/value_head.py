@@ -30,8 +30,8 @@ class ValueModel(nn.Module):
             output_hidden_states=True,
             use_cache=False,
         )
-        h = out.hidden_states[-1]                    # [B, T, D]
-        v = self.value_head(h.to(self.value_head.weight.dtype)).squeeze(-1)  # [B, T]
+        h = out.hidden_states[-1]                               
+        v = self.value_head(h.to(self.value_head.weight.dtype)).squeeze(-1)          
         return v
 
 
@@ -46,7 +46,6 @@ def build_value_model(backbone_name: str = DEFAULT_BACKBONE,
         freeze(base)
     hidden_size = base.config.hidden_size
     vm = ValueModel(base, hidden_size)
-    # Ensure the tiny head is float32 for training stability
     vm.value_head.to(torch.float32)
     return vm, tok
 

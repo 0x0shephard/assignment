@@ -26,13 +26,13 @@ def score_last_token(model, input_ids, attention_mask):
     """
     out = model(input_ids=input_ids, attention_mask=attention_mask,
                 output_hidden_states=False)
-    logits = out.logits  # [B, 1] if pooled by HF, else [B, T, 1]
+    logits = out.logits                                          
     if logits.dim() == 3:
-        idx = attention_mask.sum(dim=1) - 1                    # [B]
+        idx = attention_mask.sum(dim=1) - 1                         
         idx = idx.clamp(min=0)
         gather = idx.view(-1, 1, 1).expand(-1, 1, logits.size(-1))
-        logits = logits.gather(1, gather).squeeze(1)            # [B, 1]
-    return logits.squeeze(-1)                                    # [B]
+        logits = logits.gather(1, gather).squeeze(1)                    
+    return logits.squeeze(-1)                                         
 
 
 @dataclass

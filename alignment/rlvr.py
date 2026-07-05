@@ -48,7 +48,6 @@ def collect_rlvr_rollout(policy, policy_tok, prompts: Sequence[str],
 
     lp_old, _ = compute_response_logprobs(policy, input_ids, attn, resp_mask)
 
-    # decode only the response region (skip the left-padded prompt block)
     response_ids = input_ids[:, prompt_len:]
     response_texts = policy_tok.batch_decode(response_ids, skip_special_tokens=True)
     r_task = torch.tensor(

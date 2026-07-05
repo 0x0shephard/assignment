@@ -84,13 +84,11 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # --- data ---
     print("Loading HH-RLHF triples...")
     train_triples = load_hh_triples("train", limit=args.limit)
     eval_triples = load_hh_triples("test", limit=args.eval_limit)
     print(f"train={len(train_triples)}  eval={len(eval_triples)}")
 
-    # --- model + LoRA ---
     cfg = LoadCfg(args.policy, load_in_8bit=args.load_in_8bit, device_map=None)
     policy, tok = load_policy(cfg)
     policy = apply_lora_causal(policy, grad_ckpt=True)
@@ -103,12 +101,9 @@ def main():
     eval_loader = build_sft_loader(eval_triples, tok, batch_size=args.batch_size,
                                    max_len=args.max_len, shuffle=False)
 
-    # --- optim ---
     trainable = [p for p in policy.parameters() if p.requires_grad]
     optim = AdamW(trainable, lr=args.lr)
 
-    # --- perplexity sanity: prompt-token loss would give suspiciously low PPL
-    # (<5 per manual). Log PPL on response tokens only ---
     ppl_init = eval_perplexity(policy, eval_loader, device, max_batches=8)
     print(f"[init] response-token PPL (partial): {ppl_init:.2f}")
 
@@ -134,17 +129,14 @@ def main():
                     ppl = eval_perplexity(policy, eval_loader, device, max_batches=8)
                     print(f"  [step {step}] response-token PPL (partial): {ppl:.2f}")
 
-    # flush any tail-partial-accum
     if accum_loss != 0.0:
         optim.step()
         optim.zero_grad(set_to_none=True)
 
-    # --- final eval ---
     ppl_final = eval_perplexity(policy, eval_loader, device)
     dt = time.time() - t0
     print(f"[final] response-token PPL: {ppl_final:.2f}  ({dt/60:.1f} min)")
 
-    # --- 5 sample generations ---
     sample_prompts = [t.prompt for t in eval_triples[:5]]
     samples = sample_generations(policy, tok, sample_prompts, device)
     for i, (p, s) in enumerate(zip(sample_prompts, samples)):
@@ -152,16 +144,10 @@ def main():
         print("[PROMPT tail]", p[-120:])
         print("[GEN]", s[:300])
 
-    # --- save π_θ^(0) (LoRA adapters + tokenizer) ---
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
     policy.save_pretrained(out)
     tok.save_pretrained(out)
 
-    # --- save a "π_ref" marker directory. We keep the base weights + a flag;
-    # at load time we instantiate the base, attach these adapters, and call
-    # disable_adapter_layers() to act as π_ref. Storing the same adapters is
-    # what the manual asks for -- π_ref is literally the SFT checkpoint with
-    # adapters disabled (see model.loading.frozen_ref). ---
     ref_out = Path(args.ref_out); ref_out.mkdir(parents=True, exist_ok=True)
     policy.save_pretrained(ref_out)
     tok.save_pretrained(ref_out)

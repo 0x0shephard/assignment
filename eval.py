@@ -112,12 +112,10 @@ def main():
     print(f"Device: {device}")
     out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- prompts ----
     triples = load_hh_triples("test", limit=args.n_prompts)
     prompts = [t.prompt for t in triples]
     print(f"Loaded {len(prompts)} held-out prompts.")
 
-    # ---- reward model (shared, frozen) ----
     print("Loading reward model...")
     rm, rm_tok = load_frozen_rm(args.rm_dir, args.backbone,
                                load_in_8bit=args.load_in_8bit, device=device)
@@ -129,7 +127,6 @@ def main():
         name, path = a.split("=", 1)
         aligned_pairs.append((name, path))
 
-    # ---- SFT baseline ----
     print("\n=== SFT baseline ===")
     sft_model, sft_tok = _load_policy_from_ckpt(args.sft_dir, args.policy, device,
                                                load_in_8bit=args.load_in_8bit)
@@ -139,14 +136,12 @@ def main():
         max_new_tokens=args.max_new_tokens, batch_size=args.batch_size,
     )
     sft_gen_time = time.time() - t0
-    # RM score on full x⊕y
     sft_full = [p + r for p, r in zip(prompts, sft_responses)]
     sft_scores = score_texts(rm, rm_tok, sft_full, device,
                              batch_size=args.batch_size)
     print(f"SFT: RM mean={sft_scores.mean().item():+.3f}  "
           f"mean_len={sum(sft_lens)/max(1,len(sft_lens)):.1f}  "
           f"gen_time={sft_gen_time:.1f}s  peak_vram={vram_footprint_gb():.2f}GB")
-    # free
     del sft_model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -160,7 +155,6 @@ def main():
         }
     }
 
-    # ---- each aligned checkpoint ----
     for name, path in aligned_pairs:
         print(f"\n=== {name.upper()} @ {path} ===")
         model, tok = _load_policy_from_ckpt(path, args.policy, device,
@@ -173,11 +167,7 @@ def main():
         gen_time = time.time() - t0
         full = [p + r for p, r in zip(prompts, resp)]
         scores = score_texts(rm, rm_tok, full, device, batch_size=args.batch_size)
-        # KL vs π_ref (LoRA disabled on the aligned model — the ref is the
-        # base model, i.e. pre-SFT. If instead you want KL vs SFT, you need
-        # to attach the SFT adapters as ref; kept simple here.)
         kl = compute_kl_from_ref(model, cached, device)
-        # Win-rate vs SFT
         win = (scores.cpu() > sft_scores.cpu()).float().mean().item()
         print(f"{name}: RM mean={scores.mean().item():+.3f}  win-rate vs SFT={win:.3f}  "
               f"KL vs ref={kl:+.4f}  mean_len={sum(lens)/max(1,len(lens)):.1f}  "
@@ -190,7 +180,6 @@ def main():
             "kl_vs_ref": kl,
             "gen_time_s": gen_time,
         }
-        # attach training log if present
         for candidate in ("log.json", "summary.json"):
             p = Path(path) / candidate
             if p.exists():
@@ -199,7 +188,6 @@ def main():
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    # ---- sample response table (5 prompts × N methods) ----
     n_show = min(5, len(prompts))
     method_order = ["sft"] + [n for n, _ in aligned_pairs]
     sample_rows = []
@@ -212,7 +200,6 @@ def main():
             }
         sample_rows.append(row)
 
-    # ---- resource table (from generation only; training resource comes from log) ----
     resource_rows = []
     for m in method_order:
         r = results[m]
@@ -234,7 +221,6 @@ def main():
         "results": results,
     }, indent=2))
 
-    # ---- pretty-print summary ----
     print("\n=== SUMMARY ===")
     cols = ["method", "rm_mean", "win_rate_vs_sft", "kl_vs_ref", "mean_resp_len", "gen_time_s"]
     print("  ".join(f"{c:>18}" for c in cols))

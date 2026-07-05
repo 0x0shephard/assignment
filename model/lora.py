@@ -17,8 +17,6 @@ def apply_lora_causal(model, r: int = 8, alpha: int = 16, dropout: float = 0.05,
     )
     if grad_ckpt:
         model.gradient_checkpointing_enable()
-        # Needed for gradients to flow through checkpointed layers when the
-        # base model is frozen but LoRA adapters are trainable.
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
     return get_peft_model(model, cfg)
@@ -34,7 +32,7 @@ def apply_lora_seqcls(model, r: int = 8, alpha: int = 16, dropout: float = 0.05,
         lora_dropout=dropout,
         target_modules=list(target_modules),
         bias="none",
-        modules_to_save=["score"],  # train the scalar regression head fully
+        modules_to_save=["score"],                                          
     )
     if grad_ckpt:
         model.gradient_checkpointing_enable()

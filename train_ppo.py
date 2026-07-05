@@ -48,7 +48,7 @@ from alignment.policy_utils import logprobs_and_entropy
 def _pick_device():
     if torch.cuda.is_available():
         return torch.device("cuda")
-    return torch.device("cpu")   # PPO on MPS is fragile; disable by default
+    return torch.device("cpu")                                              
 
 
 def _load_policy_from_sft(sft_dir: str, policy_name: str, device, load_in_8bit=False,
@@ -78,9 +78,8 @@ def evaluate(policy, policy_tok, rm, rm_tok, ref_model_call, eval_prompts, devic
     policy.eval()
     gen = generate_batch(policy, policy_tok, eval_prompts, device,
                          max_new_tokens=max_new_tokens,
-                         temperature=0.0, top_p=1.0)  # greedy for eval
+                         temperature=0.0, top_p=1.0)                   
     input_ids, attn, resp_mask = gen["input_ids"], gen["attention_mask"], gen["response_mask"]
-    # KL vs π_ref via sampled-token approximation
     lp_pol, _, m = logprobs_and_entropy(policy, input_ids, attn, resp_mask)
     with ref_model_call():
         lp_ref, _, _ = logprobs_and_entropy(policy, input_ids, attn, resp_mask)
@@ -103,7 +102,7 @@ def main():
     ap.add_argument("--steps", type=int, default=200)
     ap.add_argument("--prompts_per_step", type=int, default=8)
     ap.add_argument("--max_new_tokens", type=int, default=128)
-    ap.add_argument("--beta", type=float, default=0.1)          # KL coefficient
+    ap.add_argument("--beta", type=float, default=0.1)                          
     ap.add_argument("--eps_clip", type=float, default=0.2)
     ap.add_argument("--gamma", type=float, default=1.0)
     ap.add_argument("--lam", type=float, default=0.95)
@@ -119,7 +118,6 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # ---- prompt pool from HH-RLHF ----
     print("Loading prompt pool...")
     train_triples = load_hh_triples("train", limit=args.prompt_limit)
     eval_triples = load_hh_triples("test", limit=args.eval_prompts)
@@ -127,51 +125,39 @@ def main():
     eval_prompts = [t.prompt for t in eval_triples]
     print(f"train prompts={len(prompt_pool)}  eval prompts={len(eval_prompts)}")
 
-    # ---- policy π_θ from SFT ckpt ----
     print("Loading policy π_θ from SFT ckpt...")
     policy, policy_tok = _load_policy_from_sft(args.sft_dir, args.policy, device,
                                                load_in_8bit=False)
     print("policy trainable:", param_stats(policy))
 
-    # ---- reference π_ref: use disable_adapter_layers context ----
     from model.loading import frozen_ref
     def ref_ctx():
         return frozen_ref(policy)
 
-    # ---- value model ----
     print("Loading value backbone (Llama-3.2-1B, frozen except head)...")
     value_model, _vtok = build_value_model(args.backbone, load_in_8bit=args.load_in_8bit,
                                           lora_backbone=False)
     value_model.to(device)
     print("value trainable params:", sum(p.numel() for p in value_trainable_params(value_model)))
 
-    # ---- reward model ----
     print("Loading frozen reward model...")
     rm, rm_tok = load_frozen_rm(args.rm_dir, args.backbone,
                                 load_in_8bit=args.load_in_8bit, device=device)
 
     print("initial vram:", vram_footprint_gb(), "GB")
 
-    # ---- optimizers (separate: policy LoRA vs value head) ----
     optim_pol = AdamW([p for p in policy.parameters() if p.requires_grad], lr=args.policy_lr)
     optim_val = AdamW(value_trainable_params(value_model), lr=args.value_lr)
 
     log = []
     for step in range(1, args.steps + 1):
-        # 1) sample prompts
         batch_prompts = random.sample(prompt_pool, k=args.prompts_per_step)
-        # 2) rollout
         r = collect_rollout(policy, None, value_model, rm, rm_tok, policy_tok,
                            batch_prompts, device,
                            max_new_tokens=args.max_new_tokens)
         r.to(device)
 
-        # 3) build rewards + GAE (over the response region only)
-        # shift response_mask to align with the shifted grid used in ppo.rollout
         resp_mask_shift = r.response_mask[:, 1:].float()
-        # slice the response region matching lp_old / lp_ref / v_old that were
-        # stored aligned to same shifted grid but only kept from prompt_len-1
-        # Re-derive resp region mask consistently.
         resp_start = r.prompt_len - 1
         resp_mask_r = resp_mask_shift[:, resp_start:]
         rewards = build_per_step_rewards(
@@ -181,14 +167,11 @@ def main():
                               gamma=args.gamma, lam=args.lam)
         adv_std = standardize_advantages(adv, resp_mask_r)
 
-        # 4) PPO update: 4 mini-batch epochs over the rollout
         for _epoch in range(args.epochs_per_batch):
-            # single mini-batch = the full rollout batch (small B)
             lp_new_full, ent_full, m_full = logprobs_and_entropy(
                 policy, r.input_ids, r.attention_mask, r.response_mask,
             )
             v_new_full = value_model(input_ids=r.input_ids, attention_mask=r.attention_mask)
-            # slice to response region under the shifted grid
             lp_new_r = lp_new_full[:, resp_start:]
             ent_r = ent_full[:, resp_start:]
             v_new_r = v_new_full[:, :-1][:, resp_start:]
@@ -231,7 +214,6 @@ def main():
             print(f"    eval@{step}: rm={ev['rm_mean']:+.3f} "
                   f"kl_ref={ev['kl_mean']:+.4f} len={ev['resp_len']:.1f}")
             entry.update({"eval_rm": ev["rm_mean"], "eval_kl": ev["kl_mean"]})
-            # Periodic checkpoint so a mid-training OOM doesn't lose everything.
             out_dir_step = Path(args.out); out_dir_step.mkdir(parents=True, exist_ok=True)
             policy.save_pretrained(out_dir_step)
             policy_tok.save_pretrained(out_dir_step)

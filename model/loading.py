@@ -47,7 +47,7 @@ def _prep_tokenizer(name: str):
     tok = AutoTokenizer.from_pretrained(name)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
-    tok.padding_side = "left"  # decoder-only default
+    tok.padding_side = "left"                        
     return tok
 
 

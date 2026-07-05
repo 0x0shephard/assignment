@@ -36,7 +36,6 @@ def main():
     ap.add_argument("--load_in_8bit", action="store_true")
     args = ap.parse_args()
 
-    # ---- C0.1 verify parsing ----
     print("Loading HH-RLHF triples...")
     triples = load_hh_triples(split="train", limit=args.limit)
     for i, t in enumerate(triples[:3]):
@@ -45,7 +44,6 @@ def main():
         print("[CHOSEN head]", t.chosen[:160])
         print("[REJECTED head]", t.rejected[:160])
 
-    # ---- C0.2 load models ----
     print("\nLoading policy...")
     policy, ptok = load_policy(LoadCfg(args.policy))
     print("policy raw:", param_stats(policy), "vram=", vram_footprint_gb(), "GB")
@@ -59,7 +57,6 @@ def main():
     rm, rtok = load_reward_model(LoadCfg(args.backbone, load_in_8bit=args.load_in_8bit))
     print("rm raw:", param_stats(rm), "vram=", vram_footprint_gb(), "GB")
 
-    # ---- C0.3 LoRA wrap ----
     print("\nApplying LoRA to policy (r=8, alpha=16, q/v proj)...")
     policy = apply_lora_causal(policy)
     policy.print_trainable_parameters()
@@ -69,7 +66,6 @@ def main():
     rm = apply_lora_seqcls(rm)
     rm.print_trainable_parameters()
 
-    # ---- frozen ref via disable_adapters ----
     print("\nFrozen-ref sanity: same input under adapter enabled vs disabled...")
     device = next(policy.parameters()).device
     inp = ptok("Hello, world!", return_tensors="pt").to(device)
@@ -82,7 +78,6 @@ def main():
     print("max abs diff:", (logits_on - logits_off).abs().max().item(),
           "  (LoRA is zero-init on B, so these should be identical at init)")
 
-    # ---- Dataloaders smoke test ----
     print("\nBuilding SFT + DPO/RM loaders...")
     sft_dl = build_sft_loader(triples, ptok, batch_size=2, max_len=512)
     pref_dl_policy = build_preference_loader(triples, ptok, batch_size=2, max_len=512)

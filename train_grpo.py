@@ -103,7 +103,6 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # ---- prompt pool ----
     print("Loading prompt pool...")
     train_triples = load_hh_triples("train", limit=args.prompt_limit)
     eval_triples = load_hh_triples("test", limit=args.eval_prompts)
@@ -111,13 +110,11 @@ def main():
     eval_prompts = [t.prompt for t in eval_triples]
     print(f"train prompts={len(prompt_pool)}  eval prompts={len(eval_prompts)}")
 
-    # ---- policy π_θ ----
     print("Loading policy π_θ from SFT ckpt...")
     policy, policy_tok = _load_policy_from_sft(args.sft_dir, args.policy, device,
                                               load_in_8bit=False)
     print("policy trainable:", param_stats(policy))
 
-    # ---- RM ----
     print("Loading frozen reward model...")
     rm, rm_tok = load_frozen_rm(args.rm_dir, args.backbone,
                                load_in_8bit=args.load_in_8bit, device=device)
@@ -132,18 +129,15 @@ def main():
                                    device, K=args.K,
                                    max_new_tokens=args.max_new_tokens)
 
-        # advantages (on device for the update)
         r_dev = gb.r_task.to(device)
         gid_dev = gb.group_id.to(device)
-        A_raw = group_advantages(r_dev, gid_dev, K=args.K)               # [B*K]
+        A_raw = group_advantages(r_dev, gid_dev, K=args.K)                      
 
         input_ids = gb.input_ids.to(device)
         attn = gb.attention_mask.to(device)
         resp_mask = gb.response_mask.to(device)
         lp_old = gb.logprobs_old.to(device)
 
-        # standardize batch-wide across VALID tokens: use per-row advantage
-        # replicated over valid response tokens, then normalize.
         m_shift = resp_mask[:, 1:].float()
         A_tok = A_raw.unsqueeze(1).expand_as(m_shift) * m_shift
         A_flat = A_tok[m_shift.bool()]
@@ -152,7 +146,6 @@ def main():
 
         frac_degen = degenerate_group_fraction(gb.r_task, gb.group_id)
 
-        # -- update epochs --
         for _ep in range(args.epochs_per_batch):
             out_pi = policy(input_ids=input_ids, attention_mask=attn, use_cache=False)
             logits_new = out_pi.logits
@@ -201,7 +194,6 @@ def main():
             print(f"    eval@{step}: rm={ev['rm_mean']:+.3f} "
                   f"kl_ref={ev['kl_mean']:+.4f} len={ev['resp_len']:.1f}")
             entry.update({"eval_rm": ev["rm_mean"], "eval_kl": ev["kl_mean"]})
-            # Save intermediate checkpoint so long runs survive OOM crashes.
             out_dir_step = Path(args.out); out_dir_step.mkdir(parents=True, exist_ok=True)
             policy.save_pretrained(out_dir_step)
             policy_tok.save_pretrained(out_dir_step)

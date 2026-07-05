@@ -28,13 +28,13 @@ class GroupBatch:
     All tensors have leading dim (B*K).  The `group_id` tensor maps each row
     to its prompt so we can compute group means.
     """
-    input_ids: torch.Tensor        # [B*K, T]
-    attention_mask: torch.Tensor   # [B*K, T]
-    response_mask: torch.Tensor    # [B*K, T]
-    logprobs_old: torch.Tensor     # [B*K, T-1]  aligned to shifted grid
-    r_task: torch.Tensor           # [B*K]
-    group_id: torch.Tensor         # [B*K]
-    prompt_len: int                # scalar
+    input_ids: torch.Tensor                  
+    attention_mask: torch.Tensor             
+    response_mask: torch.Tensor              
+    logprobs_old: torch.Tensor                                          
+    r_task: torch.Tensor                  
+    group_id: torch.Tensor                
+    prompt_len: int                        
     K: int
 
 
@@ -42,7 +42,6 @@ def group_advantages(r_task: torch.Tensor, group_id: torch.Tensor,
                      K: int) -> torch.Tensor:
     """A_{b,k} = r_{b,k} - μ_b.  Returns per-row advantages of shape [B*K]."""
     B = group_id.max().item() + 1
-    # scatter-mean per group
     sums = torch.zeros(B, dtype=r_task.dtype, device=r_task.device)
     counts = torch.zeros(B, dtype=r_task.dtype, device=r_task.device)
     sums.scatter_add_(0, group_id, r_task)
@@ -109,21 +108,13 @@ def grpo_step_loss(logits_new: torch.Tensor,
         logprobs_old:  [B*K, T-1]  cached from rollout time
         advantages_std: [B*K]      one scalar per row, broadcast over tokens
     """
-    # shift-by-one alignment (same as PPO)
     ids_shift = input_ids[:, 1:]
     m = response_mask[:, 1:].float()
 
-    # Sampled-token log-probs via logsumexp — avoids materializing the full
-    # [B*K, T-1, V] log-softmax tensor which would OOM for large vocab.
-    # log π(y_t) = logits[y_t] - logsumexp(logits, dim=-1)
-    #
-    # Memory discipline: we deliberately compute the "new" side, free the
-    # temporary fp32 tensor, then compute the "ref" side. Holding both at
-    # once doubles peak allocation and OOMs on T4 (~800 MB per side).
     ln_new = logits_new[:, :-1, :].float()
     gather_new = ln_new.gather(-1, ids_shift.unsqueeze(-1)).squeeze(-1)
     lse_new = torch.logsumexp(ln_new, dim=-1)
-    lp_new_tok = gather_new - lse_new                                            # [B*K, T-1]
+    lp_new_tok = gather_new - lse_new                                                        
     if kl_mode == "full":
         lp_new_all = F.log_softmax(ln_new, dim=-1)
     del ln_new
@@ -136,24 +127,21 @@ def grpo_step_loss(logits_new: torch.Tensor,
         lp_ref_all = F.log_softmax(ln_ref, dim=-1)
     del ln_ref
 
-    ratio = torch.exp(lp_new_tok - logprobs_old)                                # ρ_{k,t}
-    adv_tok = advantages_std.unsqueeze(1).expand_as(m)                          # broadcast
+    ratio = torch.exp(lp_new_tok - logprobs_old)                                         
+    adv_tok = advantages_std.unsqueeze(1).expand_as(m)                                     
 
     unclipped = ratio * adv_tok
     clipped = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip) * adv_tok
     surrogate = torch.minimum(unclipped, clipped)
 
-    # per-row (per completion) mean over tokens with 1/T_k, then mean over B*K
-    tok_counts = m.sum(dim=1).clamp(min=1)                                       # T_k
+    tok_counts = m.sum(dim=1).clamp(min=1)                                            
     per_row = -(surrogate * m).sum(dim=1) / tok_counts
     policy_loss = per_row.mean()
 
     if kl_mode == "full":
-        # Full-vocab KL: lp_new_all / lp_ref_all were computed above alongside
-        # the sampled-token log-probs. Memory-heavy — prefer "mc" on tight VRAM.
         kl_tok = per_token_kl_full(lp_new_all, lp_ref_all)
     elif kl_mode == "mc":
-        kl_tok = lp_new_tok - lp_ref_tok                                         # unbiased MC
+        kl_tok = lp_new_tok - lp_ref_tok                                                      
     else:
         raise ValueError(kl_mode)
 
@@ -165,9 +153,6 @@ def grpo_step_loss(logits_new: torch.Tensor,
     with torch.no_grad():
         approx_kl = ((logprobs_old - lp_new_tok) * m).sum() / m.sum().clamp(min=1)
         clip_frac = (((ratio - 1.0).abs() > eps_clip).float() * m).sum() / m.sum().clamp(min=1)
-        # entropy of π_θ per token, computed memory-light without materializing
-        # the full log-softmax: H = logsumexp - E[logit] where E is over softmax.
-        # For monitoring only, use sampled-token entropy proxy.
         entropy = -(lp_new_tok * m).sum() / m.sum().clamp(min=1)
     return GRPOLossOut(loss=loss, policy_loss=policy_loss.detach(),
                        kl_term=kl_term.detach(),
@@ -175,16 +160,10 @@ def grpo_step_loss(logits_new: torch.Tensor,
                        entropy=entropy)
 
 
-# ------------------------------------------------------------------
-# Sanity: group advantage sums to zero within each group
-# ------------------------------------------------------------------
-
 def sanity_group_advantage():
-    r = torch.tensor([1.0, 2.0, 3.0, 0.0,   5.0, 5.0, 5.0, 5.0])   # B=2, K=4
+    r = torch.tensor([1.0, 2.0, 3.0, 0.0,   5.0, 5.0, 5.0, 5.0])             
     gid = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
     A = group_advantages(r, gid, K=4)
-    # group 0: mean=1.5 → A=[-0.5, 0.5, 1.5, -1.5]
-    # group 1: mean=5.0 → A=[0, 0, 0, 0] (degenerate)
     expected = torch.tensor([-0.5, 0.5, 1.5, -1.5, 0.0, 0.0, 0.0, 0.0])
     assert torch.allclose(A, expected), (A, expected)
     frac = degenerate_group_fraction(r, gid)

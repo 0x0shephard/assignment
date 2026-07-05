@@ -18,18 +18,16 @@ from torch.utils.data import Dataset, DataLoader
 @dataclass
 class Triple:
     prompt: str
-    chosen: str      # response text only (no prompt)
+    chosen: str                                      
     rejected: str
 
 
 def _split_prompt_response(chosen: str, rejected: str) -> Optional[Triple]:
-    # Longest common prefix
     n = min(len(chosen), len(rejected))
     i = 0
     while i < n and chosen[i] == rejected[i]:
         i += 1
     prefix = chosen[:i]
-    # Cut prefix back to the last "\n\nAssistant:" boundary
     marker = "\n\nAssistant:"
     cut = prefix.rfind(marker)
     if cut < 0:
@@ -53,8 +51,6 @@ def load_hh_triples(split: str = "train", data_dir: str = "harmless-base", limit
             break
     return triples
 
-
-# ---------- Datasets ----------
 
 class SFTDataset(Dataset):
     """Prompt + chosen response. Labels mask prompt tokens with -100."""
@@ -92,8 +88,6 @@ class PreferenceDataset(Dataset):
         return {"prompt": t.prompt, "chosen": t.chosen, "rejected": t.rejected}
 
 
-# ---------- Collators (left-padding for decoder-only) ----------
-
 def _pad(seqs, pad_id, side="left"):
     L = max(len(s) for s in seqs)
     out, mask = [], []
@@ -113,7 +107,6 @@ def sft_collator(tokenizer, side="left"):
 
     def _c(batch):
         ids, mask = _pad([b["input_ids"] for b in batch], pad_id, side)
-        # Pad labels with -100 on the same side
         L = ids.shape[1]
         labels = []
         for b in batch:
@@ -185,7 +178,6 @@ def build_preference_loader(triples, tokenizer, batch_size=8, max_len=1024,
 
 
 if __name__ == "__main__":
-    # Verify: print 3 parsed triples
     triples = load_hh_triples(split="train", limit=3)
     for i, t in enumerate(triples):
         print(f"=== Triple {i} ===")

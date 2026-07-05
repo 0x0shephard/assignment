@@ -28,7 +28,6 @@ def eval_perplexity(model, loader, device, max_batches: int | None = None) -> fl
     for i, batch in enumerate(loader):
         if max_batches is not None and i >= max_batches:
             break
-        # Reproduce HF's shift internally so we can weight by real token count.
         input_ids = batch["input_ids"].to(device)
         attn = batch["attention_mask"].to(device)
         labels = batch["labels"].to(device)

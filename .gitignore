@@ -38,6 +38,15 @@ wandb/
 tb_logs/
 lightning_logs/
 outputs/
+pa2_progress/
+pa2_progress-*/
+pa2_progress_*/
+pa2_merged/
+pa2_merged.zip
+downloads/
+
+# ---- Private working notes (design docs, phase logs) ----
+notes/
 
 # LoRA adapters + head weights (usually small, but often overwritten)
 *.pt

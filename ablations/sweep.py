@@ -49,7 +49,6 @@ PRESETS = {
     "ppo_eps": {
         "script": "train_ppo.py",
         "flag": "--eps_clip",
-        # 1e9 = effectively unclipped (CPI)
         "values": [0.05, 0.2, 0.5, 1e9],
         "extra": ["--steps", "200"],
     },
@@ -63,8 +62,6 @@ PRESETS = {
         "script": "train_grpo.py",
         "flag": "--K",
         "values": [1, 2, 4, 8],
-        # Keep 8*K_base = 32 RM calls per step constant:
-        # prompts_per_step = 32 / K
         "extra_per_val": lambda k: ["--prompts_per_step", str(max(1, 32 // int(k))),
                                    "--steps", "200"],
     },
@@ -96,7 +93,6 @@ def run_sweep(name: str, out_root: Path, dry_run: bool = False, extra_argv=None)
         if dry_run:
             results.append({"value": v, "cmd": argv, "dir": str(run_dir)})
             continue
-        # stream stdout so we see progress
         rc = subprocess.call(argv)
         results.append({"value": v, "returncode": rc, "dir": str(run_dir)})
 

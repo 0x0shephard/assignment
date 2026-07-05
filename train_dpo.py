@@ -99,13 +99,11 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # ---- data ----
     print("Loading HH-RLHF preference pairs...")
     train_triples = load_hh_triples("train", limit=args.limit)
     eval_triples = load_hh_triples("test", limit=args.eval_limit)
     print(f"train={len(train_triples)}  eval={len(eval_triples)}")
 
-    # ---- policy π_θ from SFT ckpt (π_ref = same, LoRA disabled) ----
     print("Loading π_θ from SFT ckpt...")
     policy, tok = _load_policy_from_sft(args.sft_dir, args.policy, device,
                                         load_in_8bit=args.load_in_8bit)
@@ -122,7 +120,6 @@ def main():
 
     optim = AdamW([p for p in policy.parameters() if p.requires_grad], lr=args.lr)
 
-    # ---- init sanity: should be ~50% (Δ_θ = Δ_ref at start) ----
     acc0, z0 = eval_pref_accuracy(policy, eval_loader, device, max_batches=16)
     print(f"[init] pref accuracy (partial): {acc0:.3f}   mean lp_c - lp_r: {z0:+.3f}")
 
@@ -134,7 +131,6 @@ def main():
     for epoch in range(args.epochs):
         pbar = tqdm(train_loader, desc=f"epoch {epoch}")
         for i, batch in enumerate(pbar):
-            # π_θ log-probs (trainable)
             lp_pi_c = sequence_log_prob(
                 policy,
                 batch["chosen_input_ids"].to(device),
@@ -147,7 +143,6 @@ def main():
                 batch["rejected_attention_mask"].to(device),
                 batch["prompt_len_rejected"],
             )
-            # π_ref log-probs (frozen — adapters disabled)
             with torch.no_grad(), frozen_ref(policy):
                 lp_ref_c = sequence_log_prob(
                     policy,
@@ -185,7 +180,6 @@ def main():
                     log.append(entry)
                     print(f"  [step {step}] eval pref acc={acc:.3f}   mean z={z:+.3f}")
 
-    # ---- final ----
     acc_final, z_final = eval_pref_accuracy(policy, eval_loader, device)
     dt = time.time() - t0
     print(f"[final] eval pref acc={acc_final:.3f}   mean z={z_final:+.3f}   ({dt/60:.1f} min)")

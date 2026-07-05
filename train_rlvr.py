@@ -75,14 +75,12 @@ def eval_pass_at_1(policy, policy_tok, eval_items, device, max_new_tokens=256,
                              max_new_tokens=max_new_tokens,
                              temperature=0.0, top_p=1.0)
         ids, attn, m = gen["input_ids"], gen["attention_mask"], gen["response_mask"]
-        # KL vs π_ref
         lp, _, mv = logprobs_and_entropy(policy, ids, attn, m)
         with frozen_ref(policy):
             lpr, _, _ = logprobs_and_entropy(policy, ids, attn, m)
         row_kl = ((lp - lpr) * mv).sum(dim=1) / mv.sum(dim=1).clamp(min=1)
         kl_sum += row_kl.sum().item()
         kl_n += row_kl.size(0)
-        # response text (skip prompt block)
         resp_ids = ids[:, gen["prompt_len"]:]
         texts = policy_tok.batch_decode(resp_ids, skip_special_tokens=True)
         responses.extend(texts)
@@ -123,13 +121,11 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # ---- GSM8K ----
     print("Loading GSM8K...")
     train_items = load_gsm8k("train", limit=args.train_limit)
     eval_items = load_gsm8k("test", limit=args.eval_n)
     print(f"train={len(train_items)}  eval={len(eval_items)}")
 
-    # ---- policy π_θ from PLAIN SFT ckpt ----
     print(f"Loading policy π_θ from SFT ckpt: {args.sft_dir}")
     policy, policy_tok = _load_policy_from_sft(args.sft_dir, args.policy, device,
                                               load_in_8bit=False)
@@ -137,7 +133,6 @@ def main():
 
     optim = AdamW([p for p in policy.parameters() if p.requires_grad], lr=args.lr)
 
-    # ---- init pass@1 sanity ----
     ev0 = eval_pass_at_1(policy, policy_tok, eval_items[:64], device,
                          max_new_tokens=args.max_new_tokens)
     print(f"[init] pass@1 (partial 64): {ev0['pass@1']:.3f}  "
@@ -169,7 +164,7 @@ def main():
             mu, sd = A_flat.mean(), A_flat.std().clamp(min=1e-8)
             A_std = (A_raw - mu) / sd
         else:
-            A_std = A_raw.clone()   # keep zeros; degenerate batch → zero grad
+            A_std = A_raw.clone()                                             
 
         frac_degen = degenerate_group_fraction(gb.r_task, gb.group_id)
 
@@ -195,7 +190,7 @@ def main():
 
         entry = {
             "step": step,
-            "group_reward_mean": gb.r_task.mean().item(),   # μ over B*K
+            "group_reward_mean": gb.r_task.mean().item(),               
             "policy_loss": out.policy_loss.item(),
             "kl_term": out.kl_term.item(),
             "clip_frac": out.clip_frac.item(),
@@ -219,14 +214,12 @@ def main():
                           "eval_kl": ev["kl_ref"],
                           "eval_format_ok": ev["format_compliance"],
                           "eval_len": ev["mean_len"]})
-            # Periodic checkpoint so a mid-training OOM doesn't lose everything.
             out_dir_step = Path(args.out); out_dir_step.mkdir(parents=True, exist_ok=True)
             policy.save_pretrained(out_dir_step)
             policy_tok.save_pretrained(out_dir_step)
             (out_dir_step / "log.json").write_text(json.dumps({"log": log, "last_eval": ev}, indent=2))
             print(f"    (saved checkpoint at step {step})")
 
-    # final
     ev = eval_pass_at_1(policy, policy_tok, eval_items, device,
                        max_new_tokens=args.max_new_tokens)
     out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)

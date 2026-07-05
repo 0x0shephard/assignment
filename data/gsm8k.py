@@ -17,12 +17,11 @@ from typing import Optional
 from datasets import load_dataset
 
 
-# Order matters: try structured hints first, fall back to trailing-number.
 _PATTERNS = [
-    re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)"),                              # gold format
-    re.compile(r"\\boxed\{\s*(-?[\d,]+(?:\.\d+)?)\s*\}"),                    # \boxed{42}
-    re.compile(r"[Tt]he answer is\s*[:=]?\s*\$?\s*(-?[\d,]+(?:\.\d+)?)"),    # "The answer is 42"
-    re.compile(r"[Aa]nswer\s*[:=]\s*\$?\s*(-?[\d,]+(?:\.\d+)?)"),            # "Answer: 42"
+    re.compile(r"####\s*(-?[\d,]+(?:\.\d+)?)"),                                           
+    re.compile(r"\\boxed\{\s*(-?[\d,]+(?:\.\d+)?)\s*\}"),                                
+    re.compile(r"[Tt]he answer is\s*[:=]?\s*\$?\s*(-?[\d,]+(?:\.\d+)?)"),                        
+    re.compile(r"[Aa]nswer\s*[:=]\s*\$?\s*(-?[\d,]+(?:\.\d+)?)"),                          
 ]
 _TRAILING_NUM = re.compile(r"(-?[\d,]+(?:\.\d+)?)\s*[.)!]?\s*$")
 
@@ -42,13 +41,11 @@ def extract_answer(text: str) -> Optional[float]:
     if not text:
         return None
     for pat in _PATTERNS:
-        # take LAST match — models sometimes rehearse the problem
         matches = pat.findall(text)
         if matches:
             v = _to_number(matches[-1])
             if v is not None:
                 return v
-    # trailing number on the last non-empty line
     last_line = next((ln for ln in reversed(text.strip().splitlines()) if ln.strip()), "")
     m = _TRAILING_NUM.search(last_line)
     if m:
@@ -69,8 +66,6 @@ def answers_equal(a: Optional[float], b: Optional[float], tol: float = 1e-6) -> 
         return False
     return abs(a - b) <= tol * max(1.0, abs(b))
 
-
-# ------------------- dataset -------------------
 
 def load_gsm8k(split: str = "train", limit: Optional[int] = None):
     ds = load_dataset("openai/gsm8k", "main", split=split)
@@ -97,8 +92,6 @@ def format_prompt(question: str) -> str:
     return PROMPT_TEMPLATE.format(question=question)
 
 
-# ------------------- verifier sanity -------------------
-
 def _verify_extractor():
     """Manual §4.10 C6.1 step 4: run extract on 20 golds and 20 wrongs."""
     items = load_gsm8k("train", limit=20)
@@ -111,7 +104,7 @@ def _verify_extractor():
     wrong_ok = 0
     for w in wrongs:
         v = extract_answer(w)
-        wrong_ok += int(not answers_equal(v, 42.0))   # arbitrary wrong gold
+        wrong_ok += int(not answers_equal(v, 42.0))                         
     return ok, len(items), wrong_ok, len(wrongs)
 
 

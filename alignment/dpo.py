@@ -32,26 +32,24 @@ def sequence_log_prob(model, input_ids: torch.Tensor,
     log-prob at token t comes from logits at position t-1.
     """
     logits = model(input_ids=input_ids, attention_mask=attention_mask,
-                   use_cache=False).logits            # [B, T, V]
-    shift_logits = logits[:, :-1, :]                  # predicts tokens 1..T-1
-    shift_ids = input_ids[:, 1:]                      # [B, T-1]
-    shift_attn = attention_mask[:, 1:].float()        # [B, T-1]
+                   use_cache=False).logits                       
+    shift_logits = logits[:, :-1, :]                                          
+    shift_ids = input_ids[:, 1:]                                
+    shift_attn = attention_mask[:, 1:].float()                  
 
-    # response mask on the shifted grid: positions where the *target* token is
-    # part of the response, i.e. its index in the full seq is >= prompt_len.
     B, Tm1 = shift_ids.shape
     pos = torch.arange(Tm1, device=shift_ids.device).unsqueeze(0).expand(B, Tm1) + 1
     resp_mask = (pos >= prompt_len.to(pos.device).unsqueeze(1)).float() * shift_attn
 
     lp_all = F.log_softmax(shift_logits.float(), dim=-1)
-    lp = lp_all.gather(-1, shift_ids.unsqueeze(-1)).squeeze(-1)   # [B, T-1]
-    return (lp * resp_mask).sum(dim=1)                            # [B]
+    lp = lp_all.gather(-1, shift_ids.unsqueeze(-1)).squeeze(-1)             
+    return (lp * resp_mask).sum(dim=1)                                 
 
 
 @dataclass
 class DPOLossOut:
     loss: torch.Tensor
-    reward_margin_z: torch.Tensor        # β·(Δ_θ − Δ_ref) per example, detached
+    reward_margin_z: torch.Tensor                                               
     pref_accuracy: torch.Tensor
     delta_theta: torch.Tensor
     delta_ref: torch.Tensor

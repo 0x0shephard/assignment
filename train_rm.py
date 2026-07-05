@@ -81,21 +81,17 @@ def main():
     device = _pick_device()
     print(f"Device: {device}")
 
-    # --- data ---
     print("Loading HH-RLHF (harmless-base)...")
     train_triples = load_hh_triples("train", limit=args.limit)
     test_triples = load_hh_triples("test", limit=args.test_limit)
     print(f"train={len(train_triples)}  test={len(test_triples)}")
 
-    # --- model ---
     print("Loading RM backbone (AutoModelForSequenceClassification)...")
     cfg = LoadCfg(args.backbone,
                   load_in_8bit=args.load_in_8bit,
                   load_in_4bit=args.load_in_4bit,
-                  device_map=None)   # move manually so device is deterministic
+                  device_map=None)                                             
     model, tok = load_reward_model(cfg)
-    # RM is small (LoRA on Qwen/SmolLM); grad checkpointing is pure overhead here
-    # and roughly halves throughput. Disable it — VRAM has headroom.
     model = apply_lora_seqcls(model, grad_ckpt=False)
     model.to(device)
     print("param stats:", param_stats(model))
@@ -109,11 +105,9 @@ def main():
         shuffle=False, side="right",
     )
 
-    # --- optim ---
     trainable = [p for p in model.parameters() if p.requires_grad]
     optim = AdamW(trainable, lr=args.lr)
 
-    # --- eval before training (should be ~50%) ---
     acc0, _, _ = evaluate(model, test_loader, device, max_batches=32)
     print(f"[init] preference accuracy (partial eval): {acc0:.3f}")
 
@@ -144,17 +138,15 @@ def main():
                                  rp=f"{out.r_pos.mean().item():.3f}",
                                  rn=f"{out.r_neg.mean().item():.3f}")
 
-    # --- final eval ---
     acc, rp, rn = evaluate(model, test_loader, device)
     dt = time.time() - t0
     print(f"[final] test preference accuracy: {acc:.3f}  "
           f"r+ mean={rp.mean().item():.3f}  r- mean={rn.mean().item():.3f}  "
           f"({dt/60:.1f} min)")
 
-    # --- save adapters + summary ---
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(out_dir)                # saves LoRA adapters + score head
+    model.save_pretrained(out_dir)                                                  
     tok.save_pretrained(out_dir)
     summary = {
         "backbone": args.backbone,

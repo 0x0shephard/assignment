@@ -41,8 +41,7 @@ def build_per_step_rewards(r_task: torch.Tensor, response_mask: torch.Tensor,
     mask = response_mask.float()
     kl_tok = per_token_kl(logprobs_old, logprobs_ref) * mask
     r_kl = -beta * kl_tok
-    # sparse task reward at last valid token per row
-    last_idx = mask.sum(dim=1).long() - 1                    # [B]
+    last_idx = mask.sum(dim=1).long() - 1                         
     r_task_tok = torch.zeros_like(r_kl)
     rows = torch.arange(r_task_tok.size(0), device=r_task_tok.device)
     valid = last_idx >= 0
@@ -67,7 +66,6 @@ def compute_gae(rewards: torch.Tensor, values: torch.Tensor,
     B, T = rewards.shape
     adv = torch.zeros_like(rewards)
     gae = torch.zeros(B, dtype=rewards.dtype, device=rewards.device)
-    # bootstrap V at terminal step is 0 (episode ends at last response token)
     for t in reversed(range(T)):
         v_next = values[:, t + 1] if t + 1 < T else torch.zeros_like(values[:, 0])
         m_next = mask[:, t + 1] if t + 1 < T else torch.zeros_like(mask[:, 0])
@@ -116,7 +114,7 @@ def ppo_step_loss(logprobs_new: torch.Tensor,
     m = response_mask.float()
     n = m.sum().clamp(min=1.0)
 
-    ratio = torch.exp(logprobs_new - logprobs_old)             # ρ_t
+    ratio = torch.exp(logprobs_new - logprobs_old)                  
     unclipped = ratio * advantages
     clipped = torch.clamp(ratio, 1.0 - eps_clip, 1.0 + eps_clip) * advantages
     policy_loss = -torch.minimum(unclipped, clipped)
@@ -136,10 +134,6 @@ def ppo_step_loss(logprobs_new: torch.Tensor,
                       approx_kl=approx_kl, clip_frac=clip_frac)
 
 
-# ------------------------------------------------------------------
-# Sanity / unit tests (§4.7 Required sanity checks)
-# ------------------------------------------------------------------
-
 def gae_unit_test():
     """Manual §4.7 sanity check 1: r=[0.05,-0.02,1.6], V_old=[1.5,1.55,1.45],
     γ=λ=1. Compute A by hand, verify our implementation matches."""
@@ -147,11 +141,6 @@ def gae_unit_test():
     v = torch.tensor([[1.5, 1.55, 1.45]])
     m = torch.ones_like(r)
     adv, ret = compute_gae(r, v, m, gamma=1.0, lam=1.0)
-    # by hand:
-    # δ2 = 1.6 + 0 - 1.45 = 0.15
-    # δ1 = -0.02 + 1.45 - 1.55 = -0.12   (γ=1, m_next=1)
-    # δ0 = 0.05 + 1.55 - 1.50 = 0.10
-    # with γλ=1:  A2=0.15, A1=-0.12+0.15=0.03, A0=0.10+0.03=0.13
     expected = torch.tensor([[0.13, 0.03, 0.15]])
     assert torch.allclose(adv, expected, atol=1e-6), (adv, expected)
     return adv, ret
@@ -170,7 +159,6 @@ def clipping_test():
     and ∇=0 wrt π_θ (clipped side wins over unclipped for A>0 when ρ>1+ε)."""
     logp_new = torch.tensor([[0.0]], requires_grad=True)
     logp_old = torch.tensor([[0.0]])
-    # inject ρ = 1.5 by setting logp_new = log(1.5)
     logp_new_val = torch.tensor([[torch.log(torch.tensor(1.5)).item()]], requires_grad=True)
     adv = torch.tensor([[1.0]])
     ret = torch.tensor([[0.0]])
@@ -181,7 +169,7 @@ def clipping_test():
     expected = -(1.2)
     assert abs(out.policy_loss.item() - expected) < 1e-6, out.policy_loss
     out.loss.backward()
-    assert logp_new_val.grad is not None and torch.allclose(logp_new_val.grad, torch.zeros_like(logp_new_val.grad)), \
+    assert logp_new_val.grad is not None and torch.allclose(logp_new_val.grad, torch.zeros_like(logp_new_val.grad)),\
         f"expected zero grad on clipped side, got {logp_new_val.grad}"
     return out
 
